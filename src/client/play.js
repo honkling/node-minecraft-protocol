@@ -15,7 +15,7 @@ module.exports = function (client, options) {
       if (!client.profileKeys) throw Error("Can't sign message without profile keys, please set valid auth mode")
       if (mcData.supportFeature('chainedSignature')) { // 1.19.1/1.19.2
         const hashable = crypto.createHash('sha256').update(concat('i64', salt, 'i64', timestamp / 1000n, 'pstring', message, 'i8', 70))
-        if (preview) hashable.update(preview)
+        if (preview) hashable.update(Buffer.from(preview, 'utf8'))
         const hash = hashable.digest()
         const proto = ['UUID', client.uuid, 'buffer', hash]
         if (!!client.lastSignature && !isCommand) proto.unshift('buffer', client.lastSignature)
