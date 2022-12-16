@@ -14,6 +14,7 @@ const tcpDns = require('./client/tcp_dns')
 const autoVersion = require('./client/autoVersion')
 const pluginChannels = require('./client/pluginChannels')
 const versionChecking = require('./client/versionChecking')
+const session = require('./client/session')
 
 module.exports = createClient
 
@@ -24,6 +25,7 @@ function createClient (options) {
 
   // TODO: avoid setting default version if autoVersion is enabled
   const optVersion = options.version || require('./version').defaultVersion
+
   const mcData = require('minecraft-data')(optVersion)
   if (!mcData) throw new Error(`unsupported protocol version: ${optVersion}`)
   const version = mcData.version
@@ -60,6 +62,7 @@ function createClient (options) {
   compress(client, options)
   pluginChannels(client, options)
   versionChecking(client, options)
+  session(client, options)
 
   return client
 }

@@ -44,7 +44,6 @@ module.exports = function (client, server, options) {
         return
       }
     }
-
     if (packet.signature) {
       if (packet.signature.timestamp < BigInt(Date.now())) {
         raise('multiplayer.disconnect.invalid_public_key_signature')

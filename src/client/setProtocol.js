@@ -3,6 +3,7 @@
 const states = require('../states')
 
 module.exports = function (client, options) {
+  const mcData = require('minecraft-data')(client.version)
   client.on('connect', onConnect)
 
   function onConnect () {
@@ -24,13 +25,14 @@ module.exports = function (client, options) {
         nextState: 2
       })
       client.state = states.LOGIN
+
       client.write('login_start', {
         username: client.username,
-        signature: client.profileKeys
+        signature: (mcData.supportFeature('signatureOnLogin') && client.profileKeys)
           ? {
-              timestamp: BigInt(client.profileKeys.expiresOn.getTime()), // should probably be called "expireTime"
+              timestamp: BigInt(client.profileKeys.expireTime),
               publicKey: client.profileKeys.publicDER,
-              signature: client.profileKeys.signature
+              signature: mcData.supportFeature('profileKeySignatureV2') ? client.profileKeys.signaturev2 : client.profileKeys.signature
             }
           : null
       })

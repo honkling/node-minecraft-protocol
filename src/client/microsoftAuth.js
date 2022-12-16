@@ -2,8 +2,10 @@ const path = require('path')
 const { Authflow: PrismarineAuth, Titles } = require('prismarine-auth')
 const minecraftFolderPath = require('minecraft-folder-path')
 const debug = require('debug')('minecraft-protocol')
+const getProfileKeys = require('./profileKeys')
 
 async function authenticate (client, options) {
+  const mcData = require('minecraft-data')(client.version)
   if (!options.profilesFolder) {
     options.profilesFolder = path.join(minecraftFolderPath, 'nmp-cache')
   }
@@ -39,6 +41,7 @@ async function authenticate (client, options) {
 
   options.accessToken = token
   client.emit('session', session)
+  if (mcData.supportFeature('signedChat')) await getProfileKeys(client, options)
   options.connect(client)
 }
 
