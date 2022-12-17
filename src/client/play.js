@@ -39,11 +39,11 @@ module.exports = function (client, options) {
     }
     client.verifyMessage = (pubKey, packet, session) => {
       if (pubKey instanceof Buffer) pubKey = crypto.createPublicKey({ key: pubKey, format: 'der', type: 'spki' })
-      if(mcData.supportFeature('chainedSignature')) { // 1.19.1/1.19.2
-        
-      } else if(mcData.supportFeature('sessionSignature')) { // 1.19.3
-        const length = Buffer.byteLength(packet.plainMessage, "utf8")
-        const previousMessages = packet.previousMessages.length > 0 ? ['i32', packet.previousMessages.length, 'buffer', Buffer.concat(...packet.previousMessages.map(msg => msg.signature))] : ['i32', 0];
+      if (mcData.supportFeature('chainedSignature')) { // 1.19.1/1.19.2
+
+      } else if (mcData.supportFeature('sessionSignature')) { // 1.19.3
+        const length = Buffer.byteLength(packet.plainMessage, 'utf8')
+        const previousMessages = packet.previousMessages.length > 0 ? ['i32', packet.previousMessages.length, 'buffer', Buffer.concat(...packet.previousMessages.map(msg => msg.signature))] : ['i32', 0]
 
         const signable = concat('i32', 1, 'UUID', packet.senderUuid, 'UUID', session, 'i32', packet.index, 'i64', packet.salt, 'i64', packet.timestamp / 1000n, 'i32', length, 'pstring', packet.plainMessage, ...previousMessages)
         return crypto.verify('RSA-SHA256', signable, pubKey, packet.messageSignature)

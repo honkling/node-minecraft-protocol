@@ -8,8 +8,6 @@ async function authenticate (client, options) {
     options.profilesFolder = path.join(minecraftFolderPath, 'nmp-cache')
   }
 
-  const mcData = require('minecraft-data')(client.version)
-
   if (options.authTitle === undefined) {
     options.authTitle = Titles.MinecraftNintendoSwitch
     options.deviceType = 'Nintendo'
