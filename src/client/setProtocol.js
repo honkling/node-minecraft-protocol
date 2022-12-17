@@ -26,13 +26,13 @@ module.exports = function (client, options) {
       })
       client.state = states.LOGIN
 
-      client.write('login_start', {
+     client.write('login_start', {
         username: client.username,
         signature: (mcData.supportFeature('signatureOnLogin') && client.profileKeys)
           ? {
               timestamp: BigInt(client.profileKeys.expireTime),
               publicKey: client.profileKeys.publicDER,
-              signature: mcData.supportFeature('profileKeySignatureV2') ? client.profileKeys.signaturev2 : client.profileKeys.signature
+              signature: mcData.supportFeature('profileKeySignatureV2') ? client.profileKeys.signatureV2 : client.profileKeys.signature
             }
           : null
       })

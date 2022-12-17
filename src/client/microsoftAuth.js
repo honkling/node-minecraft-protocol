@@ -8,6 +8,8 @@ async function authenticate (client, options) {
     options.profilesFolder = path.join(minecraftFolderPath, 'nmp-cache')
   }
 
+  const mcData = require('minecraft-data')(client.version)
+
   if (options.authTitle === undefined) {
     options.authTitle = Titles.MinecraftNintendoSwitch
     options.deviceType = 'Nintendo'
@@ -34,6 +36,7 @@ async function authenticate (client, options) {
     availableProfile: [profile]
   }
   Object.assign(client, certificates)
+  client.profileKeys.expireTime = client.profileKeys.expiresOn.getTime()
   client.session = session
   client.username = profile.name
 
