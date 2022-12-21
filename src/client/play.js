@@ -53,7 +53,7 @@ module.exports = function (client, options) {
         }
         const hash = hashable.digest()
         const verifier = crypto.createVerify('RSA-SHA256')
-        if (!!packet.messageSignature) verifier.update(Buffer.from(packet.messageSignature))
+        if (packet.messageSignature) verifier.update(Buffer.from(packet.messageSignature))
         verifier.update(concat('UUID', packet.senderUuid, 'buffer', hash))
         return verifier.verify(pubKey, Buffer.from(packet.headerSignature))
       } else if (mcData.supportFeature('sessionSignature')) { // 1.19.3
@@ -67,9 +67,9 @@ module.exports = function (client, options) {
           'i64', packet.timestamp / 1000n, 'pstring', packet.signedChatContent)
         return crypto.verify('RSA-SHA256', signable, pubKey, packet.signature)
       }
-    },
+    }
     client.refreshAcknowledgements = () => {
-      if(!client.chat_log) return []
+      if (!client.chat_log) return []
 
       client.chat_log.untracked = 0
       return client.chat_log.acknowledgements
