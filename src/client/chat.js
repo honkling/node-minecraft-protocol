@@ -48,7 +48,8 @@ module.exports = function (client, options) {
       if (!client.sessionUUID) throw Error("Can't sign message before initializing chat session")
       if (!client.sessionIndex) client.sessionIndex = 0
       const length = Buffer.byteLength(message, 'utf8')
-      const signable = concat('i32', 1, 'UUID', client.uuid, 'UUID', client.sessionUUID, 'i32', client.sessionIndex, 'i64', salt, 'i64', timestamp / 1000n, 'i32', length, 'pstring', message, 'i32', 0)
+      const previousMessages = acknowledgements.length > 0 ? ['i32', acknowledgements.length, 'buffer', Buffer.concat(acknowledgements)] : ['i32', 0]
+      const signable = concat('i32', 1, 'UUID', client.uuid, 'UUID', client.sessionUUID, 'i32', client.sessionIndex, 'i64', salt, 'i64', timestamp / 1000n, 'i32', length, 'pstring', message, ...previousMessages)
       client.sessionIndex++
       return crypto.sign('RSA-SHA256', signable, client.profileKeys.private)
     } else { // 1.19
@@ -91,7 +92,7 @@ module.exports = function (client, options) {
     return client.chat_log.acknowledgements
   }
 
-  client.sendMessage = async message => {
+  client.sendChatMessage = async message => {
     if (message.length > 256) throw Error('Chat message length cannot exceed 256 characters')
 
     if (mcData.supportFeature('signedChat')) {
@@ -126,7 +127,47 @@ module.exports = function (client, options) {
 
         client.write('chat_message', packetData)
       } else if (mcData.supportFeature('sessionSignature')) {
-        // TODO
+        if (!client.chat_log) {
+          client.chat_log = {
+            log: [],
+            old: 0,
+            new: 0,
+            untracked: 0,
+            acknowledgements: [],
+            tail: 0
+          }
+        }
+
+        let ackSet = 0
+        const offset = client.chat_log.untracked
+        const acknowledgements = client.refreshAcknowledgements()
+        const toSign = []
+
+        for (let i = 0; i < 20; i++) {
+          const idx = (client.chat_log.tail + i) % 20
+          const entry = acknowledgements[idx]
+          if (!!entry) {
+            ackSet |= 1 << i
+            toSign.push(entry)
+            acknowledgements[idx] = { signature: entry.signature, pending: false }
+          }
+        }
+
+        const timestamp = BigInt(Date.now())
+        const salt = 0n
+        const bitset = Buffer.allocUnsafe(3)
+        bitset[0] = ackSet & 0xFF
+        bitset[1] = (ackSet >> 8) & 0xFF
+        bitset[2] = (ackSet >> 16) & 0xFF
+
+        client.write('chat_message', {
+          message,
+          timestamp,
+          salt,
+          signature: client.signMessage(message, timestamp, salt, toSign.map(ack => ack.signature)),
+          offset,
+          acknowledged: bitset
+        })
       } else {
         const timestamp = BigInt(Date.now())
         client.write('chat_message', {
@@ -187,9 +228,13 @@ module.exports = function (client, options) {
 
   client.on('player_info', handlePlayerInfo)
 
+  client.on('player_remove', handlePlayerRemove)
+
   client.on('player_chat', handlePlayerChat)
 
   client.on('system_chat', handleSystemChat)
+  
+  client.on('hide_message', handleHideChat)
 
   client.on('message_header', handleChatHeader)
 
@@ -216,9 +261,25 @@ module.exports = function (client, options) {
     }
   }
 
+  function handlePlayerRemove (packet) {
+    packet.players.forEach(player => {
+      if (!client.players || !client.players[player.UUID]) return
+      delete client.players[player.UUID]
+    })
+  }
+
   function handlePlayerInfo (packet) {
     if (mcData.supportFeature('playerInfoActionsIsBitfield')) { // 1.19.3
-
+      if (packet.action & 2) { // chat session
+        if (!client.players) client.players = {}
+        packet.data.forEach(player => {
+          if (!player.chatSession) return
+          client.players[player.UUID] = {
+            uuid: player.chatSession.uuid,
+            publicKey: player.chatSession.publicKey.keyBytes
+          }
+        })
+      }
     } else { // 1.19.2 and earlier
       if (packet.action === 0) { // add player
         if (!client.players) client.players = {}
@@ -234,6 +295,25 @@ module.exports = function (client, options) {
     }
   }
 
+  function handleHideChat (packet) {
+    if(mcData.supportFeature('acknowledgeUntracked')) {
+      const signature = packet.signature || resolveSignature(packet.id)
+      if(!!signature) removeMessage(packet.signature)
+    }
+  }
+
+  function resolveSignature (id) {
+    if(!client.signature_cache) return
+
+    return client.signature_cache[id]
+  }
+
+  function removeMessage (signature) {
+    if(!client.chat_log || !client.chat_log.acknowledgements) return
+
+    client.chat_log.acknowledgements = client.chat_log.acknowledgements.filter(ack => ack.signature !== signature || !ack.pending)
+  }
+
   function handlePlayerChat (packet) {
     if (!client.signedChat) return // Don't attempt to validate messages when chat signing is disabled
 
@@ -247,6 +327,26 @@ module.exports = function (client, options) {
     if (packet.filterType === filter.FULLY_FILTERED) tracked = false
 
     logMessage(packet, tracked)
+    if (mcData.supportFeature('acknowledgeUntracked')) {
+      acknowledgeMessage(packet, tracked)
+      if(!client.signature_cache) client.signature_cache = []
+
+      const signatures = []
+      const uniqueSignatures = new Set(signatures)
+      packet.previousMessages.forEach(message => {
+        if(!!message.signature) signatures.push(message.signature)
+        else if(client.signature_cache[message.id]) signatures.push(client.signature_cache[message.id])
+      })
+
+      signatures.push(packet.messageSignature)
+
+      for(let i = 0; signatures.length > 0 && i < 128; i++) {
+        const currentSignature = client.signature_cache[i]
+        client.signature_cache[i] = signatures.splice(-1, 1)[0]
+        if(!!currentSignature && !uniqueSignatures.has(currentSignature)) signatures.unshift(currentSignature)
+      }
+    }
+    else if (tracked) acknowledgeMessage(packet, tracked)
     if (tracked) client.emit('chat_validated', packet)
   }
 
@@ -280,17 +380,29 @@ module.exports = function (client, options) {
   }
 
   function validateMessage (packet) {
-    const messageSignature = packet.messageSignature ? Buffer.from(packet.messageSignature) : undefined
-    const headerSignature = Buffer.from(packet.headerSignature)
+    if (mcData.supportFeature('chainedSignature')) {
+      const messageSignature = packet.messageSignature ? Buffer.from(packet.messageSignature) : undefined
+      const headerSignature = Buffer.from(packet.headerSignature)
 
-    if (mcData.supportFeature('chainedSignature') && !validateChain(packet, messageSignature, headerSignature, true)) return states.BROKEN_CHAIN
-    if (mcData.supportFeature('sessionSignature') && !validateSession(packet)) return states.BROKEN_CHAIN
+      if (!validateChain(packet, messageSignature, headerSignature, true)) return states.BROKEN_CHAIN
 
-    const valid = client.verifyMessage(client.players[packet.senderUuid].publicKey, packet, mcData.supportFeature('sessionSignature') ? client.players[packet.senderUuid].uuid : undefined)
+      const valid = client.verifyMessage(client.players[packet.senderUuid].publicKey, packet)
 
-    if (!valid) return states.BROKEN_CHAIN
+      if (!valid) return states.BROKEN_CHAIN
 
-    client.players[packet.senderUuid].lastSignature = headerSignature
+      client.players[packet.senderUuid].lastSignature = headerSignature
+    } else if (mcData.supportFeature('sessionSignature')) {
+      if (!validateSession(packet)) return states.BROKEN_CHAIN
+
+      const valid = client.verifyMessage(client.players[packet.senderUuid].publicKey, packet, client.players[packet.senderUuid].uuid)
+
+      if (!valid) return states.BROKEN_CHAIN
+
+      client.players[packet.senderUuid].lastSignature = headerSignature
+      client.players[packet.senderUuid].index = packet.index
+    } else {
+      if (!client.verifyMessage(client.players[packet.senderUuid].publicKey, packet)) return states.BROKEN_CHAIN
+    }
     return states.SECURE
   }
 
@@ -317,7 +429,9 @@ module.exports = function (client, options) {
   }
 
   function validateSession (packet) {
-    return false
+    const lastSignature = client.players[packet.senderUuid].lastSignature
+    if (!!lastSignature && packet.messageSignature.compare(lastSignature) == 0) return true
+    else return lastSignature === undefined || packet.index > client.players[packet.senderUuid].index
   }
 
   function logSystemMessage (packet) {
@@ -354,6 +468,36 @@ module.exports = function (client, options) {
     client.chat_log.log[id % 1024] = { type: log.HEADER, packet }
   }
 
+  function acknowledgeMessage (packet, tracked) {
+    if (!client.chat_log) {
+      client.chat_log = {
+        log: [],
+        old: 0,
+        new: 0,
+        untracked: 0,
+        acknowledgements: []
+      }
+    }
+
+    if (mcData.supportFeature('chainedSignature')) { // 1.19.1/1.19.2
+      if (!client.chat_log.acknowledgements.some(message => message.messageSender === packet.senderUuid)) {
+        client.chat_log.acknowledgements.unshift({
+          messageSender: packet.senderUuid, messageSignature: packet.headerSignature
+        })
+        client.chat_log.acknowledgements.length = Math.min(client.chat_log.acknowledgements.length, 5)
+      }
+      client.chat_log.lastUntracked = undefined
+      if (client.chat_log.untracked++ > 64) sendChainedAcknowledgements()
+    } else if (mcData.supportFeature('sessionSignature')) { // 1.19.3
+      if((!client.chat_log.lastTracked && !tracked) || client.chat_log.lastTracked === packet.messageSignature) return
+      client.chat_log.tail = client.chat_log.tail || 0
+      client.chat_log.acknowledgements[client.chat_log.tail] = tracked ? { signature: packet.messageSignature, pending: true } : null
+      client.chat_log.tail = (client.chat_log.tail + 1) % 20
+      
+      if (client.chat_log.untracked++ > 64) sendSessionAcknowledgements()
+    }
+  }
+
   function logMessage (packet, tracked) {
     if (!client.chat_log) {
       client.chat_log = {
@@ -369,25 +513,26 @@ module.exports = function (client, options) {
       if (id >= 1024) client.chat_log.old++
 
       client.chat_log.log[id % 1024] = { type: log.PLAYER_MESSAGE, packet }
-
-      if (!client.chat_log.acknowledgements.some(message => message.messageSender === packet.senderUuid)) {
-        client.chat_log.acknowledgements.unshift({
-          messageSender: packet.senderUuid, messageSignature: packet.headerSignature
-        })
-        client.chat_log.acknowledgements.length = Math.min(client.chat_log.acknowledgements.length, 5)
-      }
-      client.chat_log.lastUntracked = undefined
     } else client.chat_log.lastUntracked = { sender: packet.senderUuid, signature: packet.headerSignature }
-    if (client.chat_log.untracked++ > 64) sendAcknowledgements()
   }
 
-  function sendAcknowledgements () {
+  function sendChainedAcknowledgements () {
     if (!client.chat_log) return
     const acknowledgements = client.refreshAcknowledgements()
 
     client.write('message_acknowledgement', {
       previousMessages: acknowledgements,
       lastMessage: client.chat_log.lastUntracked
+    })
+  }
+
+  function sendSessionAcknowledgements () {
+    if (!client.chat_log) return
+    const acknowledgements = client.chat_log.untracked
+    client.refreshAcknowledgements()
+
+    client.write('message_acknowledgement', {
+      count: acknowledgements
     })
   }
 }
