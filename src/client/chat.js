@@ -146,7 +146,7 @@ module.exports = function (client, options) {
         for (let i = 0; i < 20; i++) {
           const idx = (client.chat_log.tail + i) % 20
           const entry = acknowledgements[idx]
-          if (!!entry) {
+          if (entry) {
             ackSet |= 1 << i
             toSign.push(entry)
             acknowledgements[idx] = { signature: entry.signature, pending: false }
@@ -233,7 +233,7 @@ module.exports = function (client, options) {
   client.on('player_chat', handlePlayerChat)
 
   client.on('system_chat', handleSystemChat)
-  
+
   client.on('hide_message', handleHideChat)
 
   client.on('message_header', handleChatHeader)
@@ -296,20 +296,20 @@ module.exports = function (client, options) {
   }
 
   function handleHideChat (packet) {
-    if(mcData.supportFeature('acknowledgeUntracked')) {
+    if (mcData.supportFeature('acknowledgeUntracked')) {
       const signature = packet.signature || resolveSignature(packet.id)
-      if(!!signature) removeMessage(packet.signature)
+      if (signature) removeMessage(packet.signature)
     }
   }
 
   function resolveSignature (id) {
-    if(!client.signature_cache) return
+    if (!client.signature_cache) return
 
     return client.signature_cache[id]
   }
 
   function removeMessage (signature) {
-    if(!client.chat_log || !client.chat_log.acknowledgements) return
+    if (!client.chat_log || !client.chat_log.acknowledgements) return
 
     client.chat_log.acknowledgements = client.chat_log.acknowledgements.filter(ack => ack.signature !== signature || !ack.pending)
   }
@@ -329,24 +329,23 @@ module.exports = function (client, options) {
     logMessage(packet, tracked)
     if (mcData.supportFeature('acknowledgeUntracked')) {
       acknowledgeMessage(packet, tracked)
-      if(!client.signature_cache) client.signature_cache = []
+      if (!client.signature_cache) client.signature_cache = []
 
       const signatures = []
       const uniqueSignatures = new Set(signatures)
       packet.previousMessages.forEach(message => {
-        if(!!message.signature) signatures.push(message.signature)
-        else if(client.signature_cache[message.id]) signatures.push(client.signature_cache[message.id])
+        if (message.signature) signatures.push(message.signature)
+        else if (client.signature_cache[message.id]) signatures.push(client.signature_cache[message.id])
       })
 
       signatures.push(packet.messageSignature)
 
-      for(let i = 0; signatures.length > 0 && i < 128; i++) {
+      for (let i = 0; signatures.length > 0 && i < 128; i++) {
         const currentSignature = client.signature_cache[i]
         client.signature_cache[i] = signatures.splice(-1, 1)[0]
-        if(!!currentSignature && !uniqueSignatures.has(currentSignature)) signatures.unshift(currentSignature)
+        if (!!currentSignature && !uniqueSignatures.has(currentSignature)) signatures.unshift(currentSignature)
       }
-    }
-    else if (tracked) acknowledgeMessage(packet, tracked)
+    } else if (tracked) acknowledgeMessage(packet, tracked)
     if (tracked) client.emit('chat_validated', packet)
   }
 
@@ -398,7 +397,7 @@ module.exports = function (client, options) {
 
       if (!valid) return states.BROKEN_CHAIN
 
-      client.players[packet.senderUuid].lastSignature = headerSignature
+      client.players[packet.senderUuid].lastSignature = packet.messageSignature
       client.players[packet.senderUuid].index = packet.index
     } else {
       if (!client.verifyMessage(client.players[packet.senderUuid].publicKey, packet)) return states.BROKEN_CHAIN
@@ -430,7 +429,7 @@ module.exports = function (client, options) {
 
   function validateSession (packet) {
     const lastSignature = client.players[packet.senderUuid].lastSignature
-    if (!!lastSignature && packet.messageSignature.compare(lastSignature) == 0) return true
+    if (!!lastSignature && packet.messageSignature.compare(lastSignature) === 0) return true
     else return lastSignature === undefined || packet.index > client.players[packet.senderUuid].index
   }
 
@@ -489,11 +488,11 @@ module.exports = function (client, options) {
       client.chat_log.lastUntracked = undefined
       if (client.chat_log.untracked++ > 64) sendChainedAcknowledgements()
     } else if (mcData.supportFeature('sessionSignature')) { // 1.19.3
-      if((!client.chat_log.lastTracked && !tracked) || client.chat_log.lastTracked === packet.messageSignature) return
+      if ((!client.chat_log.lastTracked && !tracked) || client.chat_log.lastTracked === packet.messageSignature) return
       client.chat_log.tail = client.chat_log.tail || 0
       client.chat_log.acknowledgements[client.chat_log.tail] = tracked ? { signature: packet.messageSignature, pending: true } : null
       client.chat_log.tail = (client.chat_log.tail + 1) % 20
-      
+
       if (client.chat_log.untracked++ > 64) sendSessionAcknowledgements()
     }
   }
