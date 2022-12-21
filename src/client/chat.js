@@ -152,8 +152,8 @@ module.exports = function (client, options) {
 
   }
 
-  function queueMessagePreview(message, resolve, reject) {
-    
+  function queueMessagePreview (message, resolve, reject) {
+
   }
 
   // Packet handling
