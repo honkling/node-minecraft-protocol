@@ -35,7 +35,7 @@ declare module 'minecraft-protocol' {
 		registerChannel(name: string, typeDefinition: any, custom?: boolean): void
 		unregisterChannel(name: string): void
 		writeChannel(channel: any, params: any): void
-		signMessage(message: string, timestamp: BigInt, salt?: number, isCommand?: boolean, preview?: string): Buffer
+		signMessage(message: string, timestamp: BigInt, salt?: number, acknowledgements: object[], isCommand?: boolean, preview?: string): Buffer
 		verifyMessage(publicKey: Buffer | KeyObject, packet: object, session: string): boolean
 		on(event: 'error', listener: (error: Error) => PromiseLike): this
 		on(event: 'packet', handler: (data: any, packetMeta: PacketMeta, buffer: Buffer, fullBuffer: Buffer) => PromiseLike): this
