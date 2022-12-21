@@ -92,6 +92,8 @@ module.exports = function (client, options) {
   }
 
   client.sendMessage = async message => {
+    if (message.length > 256) throw Error('Chat message length cannot exceed 256 characters')
+
     if (mcData.supportFeature('signedChat')) {
       if (mcData.supportFeature('chainedSignature')) {
         const salt = 0n
@@ -149,11 +151,34 @@ module.exports = function (client, options) {
   }
 
   function requestPreview (message, resolve, reject) {
+    client.previewId = client.previewId || 0
+    const id = client.previewId++
+    client.pendingPreview = { id, resolve, reject }
 
+    if (!client.lastPreviewRequest) client.lastPreviewRequest = 0
+    const diff = Date.now() - client.lastPreviewRequest
+
+    function sendPacket () {
+      client.write('chat_preview', {
+        query: id,
+        message
+      })
+
+      if (options.timeoutPreview) {
+        client.previewTimeout = setTimeout(() => {
+          throw Error('Server did not respond with preview in time') // Probably should not throw
+        }, options.timeoutPreview)
+      }
+    }
+
+    if (diff < 100) {
+      setTimeout(sendPacket, diff + 1)
+    } else sendPacket()
   }
 
   function queueMessagePreview (message, resolve, reject) {
-
+    if (!client.previewQueue) client.previewQueue = []
+    client.previewQueue.push({ message, resolve, reject })
   }
 
   // Packet handling
@@ -178,7 +203,17 @@ module.exports = function (client, options) {
   })
 
   function handleChatPreview (packet) {
-    // TODO
+    if (packet.queryId === client.pendingPreview.id) {
+      setTimeout(() => {
+        client.pendingPreview.resolve(packet.message)
+      }, 200) // Previews are invalid for the first 200 milliseconds
+
+      if (client.previewTimeout) clearTimeout(client.previewTimeout)
+      if (options.queueMessages && !!client.previewQueue) {
+        const next = client.previewQueue.splice(0, 1)
+        if (next) requestPreview(next.message, next.resolve, next.reject)
+      }
+    }
   }
 
   function handlePlayerInfo (packet) {
@@ -278,7 +313,7 @@ module.exports = function (client, options) {
 
     if (!packet.headerSignature || packet.headerSignature.length === 0) return false
     if (full && !!signature && !!lastSignature && lastSignature.compare(signature) === 0) return true
-    return lastSignature === null || lastSignature.compare(header) === 0
+    return lastSignature === undefined || lastSignature.compare(header) === 0
   }
 
   function validateSession (packet) {
