@@ -53,21 +53,21 @@ module.exports = function (client, server, options) {
         const publicKey = crypto.createPublicKey({ key: packet.signature.publicKey, format: 'der', type: 'spki' })
         const publicPEM = mcPubKeyToPem(packet.signature.publicKey)
         if (mcData.supportFeature('profileKeySignatureV2')) {
-          const signable = packet.signature.timestamp + publicPEM // (expires at + publicKey)
-
-          if (!crypto.verify('RSA-SHA1', Buffer.from(signable, 'utf8'), mojangPubKey, packet.signature.signature)) {
-            raise('multiplayer.disconnect.invalid_public_key_signature')
-            return
-          }
-          client.profileKeys = { public: publicKey, publicPEM }
-        } else {
           if (!packet.playerUUID) {
-            raise('multiplayer.disconnect.invalid_packet')
+            client.end('Invalid packet format', JSON.stringify({ translate: 'disconnect.genericReason', with: [{ text: 'Invalid packet format' }] }))
             return
           }
           const signable = packet.signature.timestamp + publicPEM // (expires at + publicKey)
 
           if (!crypto.verify('RSA-SHA1', concat('UUID', packet.playerUUID, 'buffer', Buffer.from(signable, 'utf8')), mojangPubKey, packet.signature.signature)) {
+            raise('multiplayer.disconnect.invalid_public_key_signature')
+            return
+          }
+          client.profileKeys = { public: publicKey, publicPEM }
+        } else {
+          const signable = packet.signature.timestamp + publicPEM // (expires at + publicKey)
+
+          if (!crypto.verify('RSA-SHA1', Buffer.from(signable, 'utf8'), mojangPubKey, packet.signature.signature)) {
             raise('multiplayer.disconnect.invalid_public_key_signature')
             return
           }
@@ -209,24 +209,24 @@ module.exports = function (client, server, options) {
     pluginChannels(client, options)
 
     if (client.profileKeys) {
-      client.verifyMessage = (packet, session) => {
+      client.verifyMessage = (packet, acknowledgements) => {
         if (mcData.supportFeature('chainedSignature')) { // 1.19.1/1.19.2
-          const hashable = crypto.createHash('sha256').update(concat('i64', packet.salt, 'i64', packet.timestamp / 1000n, 'pstring', packet.plainMessage, 'i8', 70))
-          if (packet.formattedMessage) hashable.update(Buffer.from(packet.formattedMessage, 'utf8')) // TODO: (Properly) implement chat previews
+          const hashable = crypto.createHash('sha256').update(concat('i64', packet.salt, 'i64', packet.timestamp / 1000n, 'pstring', packet.message, 'i8', 70))
+          if (packet.signedPreview) hashable.update(Buffer.from(client.createPreview(packet.message), 'utf8')) // TODO: Implement chat previews
           for (const previousMessage of packet.previousMessages) {
             hashable.update(concat('i8', 70, 'UUID', previousMessage.messageSender))
             hashable.update(Buffer.from(previousMessage.messageSignature))
           }
           const hash = hashable.digest()
           const verifier = crypto.createVerify('RSA-SHA256')
-          if (packet.messageSignature) verifier.update(Buffer.from(packet.messageSignature))
+          if (client.previousSignature) verifier.update(client.previousSignature)
           verifier.update(concat('UUID', packet.senderUuid, 'buffer', hash))
-          return verifier.verify(client.profileKeys.public, Buffer.from(packet.headerSignature))
+          return verifier.verify(client.profileKeys.public, packet.signature)
         } else if (mcData.supportFeature('sessionSignature')) { // 1.19.3
-          const length = Buffer.byteLength(packet.plainMessage, 'utf8')
-          const previousMessages = packet.previousMessages.length > 0 ? ['i32', packet.previousMessages.length, 'buffer', Buffer.concat(...packet.previousMessages.map(msg => msg.signature))] : ['i32', 0]
+          const length = Buffer.byteLength(packet.message, 'utf8')
+          const previousMessages = acknowledgements.length > 0 ? ['i32', acknowledgements.length, 'buffer', Buffer.concat(...acknowledgements)] : ['i32', 0]
 
-          const signable = concat('i32', 1, 'UUID', packet.senderUuid, 'UUID', session, 'i32', packet.index, 'i64', packet.salt, 'i64', packet.timestamp / 1000n, 'i32', length, 'pstring', packet.plainMessage, ...previousMessages)
+          const signable = concat('i32', 1, 'UUID', client.uuid, 'UUID', client.session.uuid, 'i32', client.session.index, 'i64', packet.salt, 'i64', packet.timestamp / 1000n, 'i32', length, 'pstring', packet.message, ...previousMessages)
           return crypto.verify('RSA-SHA256', signable, client.profileKeys.public, packet.messageSignature)
         } else { // 1.19
           const signable = concat('i64', packet.salt, 'UUID', packet.senderUuid,

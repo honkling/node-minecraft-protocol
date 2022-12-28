@@ -332,13 +332,14 @@ module.exports = function (client, options) {
       if (!client.signature_cache) client.signature_cache = []
 
       const signatures = []
-      const uniqueSignatures = new Set(signatures)
       packet.previousMessages.forEach(message => {
         if (message.signature) signatures.push(message.signature)
         else if (client.signature_cache[message.id]) signatures.push(client.signature_cache[message.id])
       })
 
       signatures.push(packet.messageSignature)
+
+      const uniqueSignatures = new Set(signatures)
 
       for (let i = 0; signatures.length > 0 && i < 128; i++) {
         const currentSignature = client.signature_cache[i]
