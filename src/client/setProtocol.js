@@ -14,7 +14,6 @@ module.exports = function (client, options) {
     }
 
     function next () {
-      client.uuid = client.session.selectedProfile.id.replace(/(\w{8})(\w{4})(\w{4})(\w{4})(\w{12})/, '$1-$2-$3-$4-$5')
       let taggedHost = options.host
       if (client.tagHost) taggedHost += client.tagHost
       if (options.fakeHost) taggedHost = options.fakeHost

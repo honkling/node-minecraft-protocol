@@ -36,6 +36,7 @@ async function authenticate (client, options) {
   Object.assign(client, certificates)
   client.profileKeys.expireTime = client.profileKeys.expiresOn.getTime()
   client.session = session
+  client.uuid = profile.id.replace(/(\w{8})(\w{4})(\w{4})(\w{4})(\w{12})/, '$1-$2-$3-$4-$5')
   client.username = profile.name
 
   options.accessToken = token
