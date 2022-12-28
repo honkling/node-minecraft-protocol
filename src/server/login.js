@@ -223,7 +223,7 @@ module.exports = function (client, server, options) {
           verifier.update(concat('UUID', client.uuid, 'buffer', hash))
           return verifier.verify(client.profileKeys.public, packet.signature)
         } else { // 1.19
-          const signable = concat('i64', packet.salt, 'UUID', client.uuid, 'i64', packet.timestamp / 1000n, 'pstring', JSON.stringify({text: packet.message}))
+          const signable = concat('i64', packet.salt, 'UUID', client.uuid, 'i64', packet.timestamp / 1000n, 'pstring', JSON.stringify({ text: packet.message }))
           return crypto.verify('RSA-SHA256', signable, client.profileKeys.public, packet.signature)
         }
       }

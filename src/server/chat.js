@@ -125,7 +125,7 @@ module.exports = function (client, server, options) {
   function handleChatMessage (packet) {
     if (!signedChat) return // Don't validate messages when chat signing is disabled
 
-    if (!client.profileKeys) return //? Not sure how to handle this situation currently
+    if (!client.profileKeys) return // ? Not sure how to handle this situation currently
 
     if (!isLegal(packet.message)) {
       raise('multiplayer.disconnect.illegal_characters')
