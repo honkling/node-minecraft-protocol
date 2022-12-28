@@ -8,7 +8,7 @@ module.exports = function (client, options) {
   function onLogin () {
     if (mcData.supportFeature('sessionSignature') && client.profileKeys) {
       client.sessionUUID = uuid.v4fast() // Randomness is irrelevant
-      client.write('session', {
+      client.write('chat_session', {
         sessionUUID: client.sessionUUID,
         expireTime: BigInt(client.profileKeys.expireTime),
         publicKey: client.profileKeys.publicDER,

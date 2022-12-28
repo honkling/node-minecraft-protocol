@@ -38,7 +38,7 @@ module.exports = function (client, server, options) {
     const needToVerify = (onlineMode && !isException) || (!onlineMode && isException)
 
     if (mcData.supportFeature('signatureEncryption')) {
-      if (options.enforceSecureProfile && !packet.signature) {
+      if (options.enforceSecureProfile && !packet.signature) { // TODO: Don't enforce this check in 1.19.3
         raise('multiplayer.disconnect.missing_public_key')
         return
       }
@@ -51,23 +51,22 @@ module.exports = function (client, server, options) {
 
       try {
         const publicKey = crypto.createPublicKey({ key: packet.signature.publicKey, format: 'der', type: 'spki' })
-        const publicPEM = mcPubKeyToPem(packet.signature.publicKey)
+        const publicDER = publicKey.export({ type: 'spki', format: 'der' })
+        const publicPEM = mcPubKeyToPem(publicDER)
         if (mcData.supportFeature('profileKeySignatureV2')) {
           if (!packet.playerUUID) {
             client.end('Invalid packet format', JSON.stringify({ translate: 'disconnect.genericReason', with: [{ text: 'Invalid packet format' }] }))
             return
           }
-          const signable = packet.signature.timestamp + publicPEM // (expires at + publicKey)
 
-          if (!crypto.verify('RSA-SHA1', concat('UUID', packet.playerUUID, 'buffer', Buffer.from(signable, 'utf8')), mojangPubKey, packet.signature.signature)) {
+          if (!crypto.verify('RSA-SHA1', concat('UUID', packet.playerUUID, 'i64', packet.signature.timestamp, 'buffer', publicDER), mojangPubKey, packet.signature.signature)) {
             raise('multiplayer.disconnect.invalid_public_key_signature')
             return
           }
           client.profileKeys = { public: publicKey, publicPEM }
         } else {
           const signable = packet.signature.timestamp + publicPEM // (expires at + publicKey)
-
-          if (!crypto.verify('RSA-SHA1', Buffer.from(signable, 'utf8'), mojangPubKey, packet.signature.signature)) {
+          if (!crypto.verify('RSA-SHA1', Buffer.from(signable, 'ascii'), mojangPubKey, packet.signature.signature)) {
             raise('multiplayer.disconnect.invalid_public_key_signature')
             return
           }
@@ -157,6 +156,7 @@ module.exports = function (client, server, options) {
           client.end('Failed to verify username!')
           return
         }
+
         // Convert to a valid UUID until the session server updates and does
         // it automatically
         client.uuid = profile.id.replace(/(\w{8})(\w{4})(\w{4})(\w{4})(\w{12})/, '$1-$2-$3-$4-$5')
@@ -220,17 +220,10 @@ module.exports = function (client, server, options) {
           const hash = hashable.digest()
           const verifier = crypto.createVerify('RSA-SHA256')
           if (client.previousSignature) verifier.update(client.previousSignature)
-          verifier.update(concat('UUID', packet.senderUuid, 'buffer', hash))
+          verifier.update(concat('UUID', client.uuid, 'buffer', hash))
           return verifier.verify(client.profileKeys.public, packet.signature)
-        } else if (mcData.supportFeature('sessionSignature')) { // 1.19.3
-          const length = Buffer.byteLength(packet.message, 'utf8')
-          const previousMessages = acknowledgements.length > 0 ? ['i32', acknowledgements.length, 'buffer', Buffer.concat(...acknowledgements)] : ['i32', 0]
-
-          const signable = concat('i32', 1, 'UUID', client.uuid, 'UUID', client.session.uuid, 'i32', client.session.index, 'i64', packet.salt, 'i64', packet.timestamp / 1000n, 'i32', length, 'pstring', packet.message, ...previousMessages)
-          return crypto.verify('RSA-SHA256', signable, client.profileKeys.public, packet.messageSignature)
         } else { // 1.19
-          const signable = concat('i64', packet.salt, 'UUID', packet.senderUuid,
-            'i64', packet.timestamp / 1000n, 'pstring', packet.signedChatContent)
+          const signable = concat('i64', packet.salt, 'UUID', client.uuid, 'i64', packet.timestamp / 1000n, 'pstring', JSON.stringify({text: packet.message}))
           return crypto.verify('RSA-SHA256', signable, client.profileKeys.public, packet.signature)
         }
       }

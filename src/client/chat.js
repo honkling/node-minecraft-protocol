@@ -110,7 +110,7 @@ module.exports = function (client, options) {
             const timestamp = BigInt(Date.now())
             packetData.timestamp = timestamp
             packetData.signature = client.signMessage(message, timestamp, salt, acknowledgements, false, preview)
-            packetData.previousMessages = client.chat_log.acknowledgements
+            packetData.previousMessages = client.chat_log ? client.chat_log.acknowledgements : []
             packetData.lastMessage = client.chat_log ? client.chat_log.lastUntracked : undefined
           } catch {
             // Discard message
@@ -121,7 +121,7 @@ module.exports = function (client, options) {
           const timestamp = BigInt(Date.now())
           packetData.timestamp = timestamp
           packetData.signature = client.signMessage(message, timestamp, salt, acknowledgements)
-          packetData.previousMessages = client.chat_log.acknowledgements
+          packetData.previousMessages = client.chat_log ? client.chat_log.acknowledgements : []
           packetData.lastMessage = client.chat_log ? client.chat_log.lastUntracked : undefined
         }
 

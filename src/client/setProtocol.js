@@ -14,6 +14,7 @@ module.exports = function (client, options) {
     }
 
     function next () {
+      client.uuid = client.session.selectedProfile.id.replace(/(\w{8})(\w{4})(\w{4})(\w{4})(\w{12})/, '$1-$2-$3-$4-$5')
       let taggedHost = options.host
       if (client.tagHost) taggedHost += client.tagHost
       if (options.fakeHost) taggedHost = options.fakeHost
@@ -28,13 +29,14 @@ module.exports = function (client, options) {
 
       client.write('login_start', {
         username: client.username,
+        playerUUID: mcData.supportFeature('signatureOnLogin') ? client.uuid : undefined,
         signature: (mcData.supportFeature('signatureOnLogin') && client.profileKeys)
           ? {
               timestamp: BigInt(client.profileKeys.expireTime),
               publicKey: client.profileKeys.publicDER,
               signature: mcData.supportFeature('profileKeySignatureV2') ? client.profileKeys.signatureV2 : client.profileKeys.signature
             }
-          : null
+          : undefined
       })
     }
   }

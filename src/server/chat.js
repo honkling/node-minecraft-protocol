@@ -50,45 +50,27 @@ module.exports = function (client, server, options) {
   }
 
   function handleChatSession (packet) {
-    const publicKey = crypto.createPublicKey({ key: packet.publicKey.keyBytes, format: 'der', type: 'spki' })
-    const publicPEM = mcPubKeyToPem(packet.publicKey.keyBytes)
-
     client.session = {
-      uuid: packet.uuid,
+      uuid: packet.sessionUUID,
       index: 0
     }
 
-    const signable = packet.signature.timestamp + publicPEM // (expires at + publicKey)
+    const publicKey = crypto.createPublicKey({ key: packet.publicKey, format: 'der', type: 'spki' })
+    const publicDER = publicKey.export({ type: 'spki', format: 'der' })
+    const publicPEM = mcPubKeyToPem(publicDER)
 
-    if (!crypto.verify('RSA-SHA1', concat('UUID', client.uuid, 'buffer', Buffer.from(signable, 'utf8')), mojangPubKey, packet.publicKey.signature)) {
+    if (!crypto.verify('RSA-SHA1', concat('UUID', client.uuid, 'i64', packet.expireTime, 'buffer', publicDER), mojangPubKey, packet.signature)) {
       raise('multiplayer.disconnect.invalid_public_key_signature')
       return
     }
+
     if (!client.profileKeys) {
       client.verifyMessage = (packet, acknowledgements) => {
-        if (mcData.supportFeature('chainedSignature')) { // 1.19.1/1.19.2
-          const hashable = crypto.createHash('sha256').update(concat('i64', packet.salt, 'i64', packet.timestamp / 1000n, 'pstring', packet.message, 'i8', 70))
-          if (packet.signedPreview) hashable.update(Buffer.from(client.createPreview(packet.message), 'utf8')) // TODO: Implement chat previews
-          for (const previousMessage of packet.previousMessages) {
-            hashable.update(concat('i8', 70, 'UUID', previousMessage.messageSender))
-            hashable.update(Buffer.from(previousMessage.messageSignature))
-          }
-          const hash = hashable.digest()
-          const verifier = crypto.createVerify('RSA-SHA256')
-          if (client.previousSignature) verifier.update(client.previousSignature)
-          verifier.update(concat('UUID', packet.senderUuid, 'buffer', hash))
-          return verifier.verify(client.profileKeys.public, packet.signature)
-        } else if (mcData.supportFeature('sessionSignature')) { // 1.19.3
-          const length = Buffer.byteLength(packet.message, 'utf8')
-          const previousMessages = acknowledgements.length > 0 ? ['i32', acknowledgements.length, 'buffer', Buffer.concat(...acknowledgements)] : ['i32', 0]
+        const length = Buffer.byteLength(packet.message, 'utf8')
+        const previousMessages = acknowledgements.length > 0 ? ['i32', acknowledgements.length, 'buffer', Buffer.concat(...acknowledgements)] : ['i32', 0]
 
-          const signable = concat('i32', 1, 'UUID', client.uuid, 'UUID', client.session.uuid, 'i32', client.session.index, 'i64', packet.salt, 'i64', packet.timestamp / 1000n, 'i32', length, 'pstring', packet.message, ...previousMessages)
-          return crypto.verify('RSA-SHA256', signable, client.profileKeys.public, packet.messageSignature)
-        } else { // 1.19
-          const signable = concat('i64', packet.salt, 'UUID', packet.senderUuid,
-            'i64', packet.timestamp / 1000n, 'pstring', packet.signedChatContent)
-          return crypto.verify('RSA-SHA256', signable, client.profileKeys.public, packet.signature)
-        }
+        const signable = concat('i32', 1, 'UUID', client.uuid, 'UUID', client.session.uuid, 'i32', client.session.index, 'i64', packet.salt, 'i64', packet.timestamp / 1000n, 'i32', length, 'pstring', packet.message, ...previousMessages)
+        return crypto.verify('RSA-SHA256', signable, client.profileKeys.public, packet.signature)
       }
     }
     client.profileKeys = { public: publicKey, publicPEM }
@@ -143,7 +125,7 @@ module.exports = function (client, server, options) {
   function handleChatMessage (packet) {
     if (!signedChat) return // Don't validate messages when chat signing is disabled
 
-    if (!client.profileKeys) return // Not sure how to handle this situation currently
+    if (!client.profileKeys) return //? Not sure how to handle this situation currently
 
     if (!isLegal(packet.message)) {
       raise('multiplayer.disconnect.illegal_characters')
@@ -208,7 +190,7 @@ module.exports = function (client, server, options) {
 
     if (mcData.supportFeature('chainedSignature')) client.previousSignature = packet.signature
 
-    // Chat message validated
+    // Message validated
   }
 
   function getAcknowledgements (packet) {
@@ -237,7 +219,7 @@ module.exports = function (client, server, options) {
         client.previousMessages[i].pending = false
         acknowledgements.push(tracked.signature)
       } else {
-        if (tracked !== null && !tracked.pending) return { valid: false, acknowledgements }
+        if (!!tracked && !tracked.pending) return { valid: false, acknowledgements }
 
         client.previousMessages[i] = null
       }
