@@ -28,7 +28,7 @@ function createClient (options) {
   const optVersion = options.version || require('./version').defaultVersion
 
   const mcData = require('minecraft-data')(optVersion)
-  if (!mcData && optVersion !== "1.19.3") throw new Error(`unsupported protocol version: ${optVersion}`)
+  if (!mcData) throw new Error(`unsupported protocol version: ${optVersion}`)
   const version = mcData.version
   options.majorVersion = version.majorVersion
   options.protocolVersion = version.version
